@@ -25,7 +25,8 @@ app.post('/api/login', (req, res) => {
   res.json({ token });
 });
 
-const PORT = process.env.PORT || 3000;
+// 🚨 REQUIRED CHANGE FOR ZAP + GitHub Actions
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('Negative backend listening on port ' + PORT);
 });
