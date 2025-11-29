@@ -11,18 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ---------- Install CLI security tools ----------
       - name: Install Tools
         run: |
-          sudo apt update
-          sudo apt install -y docker.io
           npm install -g snyk snyk-to-html
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
+      # ---------- Install backend + frontend deps ----------
       - name: Install dependencies
         run: |
           cd backend && npm install || true
           cd ../frontend && npm install || true
 
+      # ---------- Build + run Docker containers ----------
       - name: Build and Run Docker
         run: |
           docker build -t backend-image:ci backend || true
@@ -30,7 +31,7 @@ jobs:
           docker compose -f docker-compose.yml up -d || true
           sleep 25
 
-      # ------------------------ SNYK ------------------------
+      # ---------- SNYK (HTML report) ----------
       - name: Snyk HTML Report
         run: |
           mkdir -p reports
@@ -39,7 +40,7 @@ jobs:
           snyk-to-html -i ../reports/snyk.json -o ../reports/snyk-backend.html || true
           cd ..
 
-      # ------------------------ TRIVY ------------------------
+      # ---------- TRIVY (HTML reports) ----------
       - name: Trivy HTML Report
         run: |
           mkdir -p reports
@@ -48,7 +49,7 @@ jobs:
           trivy convert report -i reports/trivy-backend.json -o reports/trivy-backend.html || true
           trivy convert report -i reports/trivy-frontend.json -o reports/trivy-frontend.html || true
 
-      # ------------------------ ZAP ------------------------
+      # ---------- ZAP (HTML report) ----------
       - name: ZAP HTML Report
         uses: zaproxy/action-baseline@v0.12.0
         with:
@@ -61,13 +62,13 @@ jobs:
           mkdir -p reports
           if [ -f zap.html ]; then mv zap.html reports/zap-baseline.html; fi
 
-      # ------------------------ DeepSource ------------------------
+      # ---------- DeepSource (static HTML) ----------
       - name: Copy DeepSource HTML
         run: |
           mkdir -p reports
           if [ -f deepsource_report.html ]; then cp deepsource_report.html reports/deepsource_report.html; fi
 
-      # ------------------------ Artifact ------------------------
+      # ---------- Artifact upload ----------
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
