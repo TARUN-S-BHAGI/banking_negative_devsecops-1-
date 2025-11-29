@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: ./backend
+    container_name: banking-backend
+    environment:
+      - PORT=3000
+    ports:
+      - "10001:3000"
+    profiles: ["ci"]
+  frontend:
+    build: ./frontend
+    container_name: banking-frontend
+    environment:
+      - PORT=8080
+      - BACKEND_URL=http://backend:3000
+    ports:
+      - "10000:8080"
+    depends_on:
+      - backend
+    profiles: ["ci"]

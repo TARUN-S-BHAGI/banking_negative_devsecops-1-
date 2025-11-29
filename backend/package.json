@@ -1,0 +1,13 @@
+{
+  "name": "banking-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"No backend tests (negative)\\" && exit 0"
+  },
+  "dependencies": {
+    "express": "4.17.1",
+    "jsonwebtoken": "8.5.1"
+  }
+}

@@ -1,0 +1,140 @@
+stages:
+  - install
+  - test
+  - build
+  - security
+  - dast
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  COMPOSE_PROFILES: ci
+  COMPOSE_PROJECT_NAME: "ciapp"
+  ZAP_TARGET: "http://backend:3000/api/health"
+
+# ------------------------------------------------------------------
+# INSTALL & TEST
+# ------------------------------------------------------------------
+.install_image: &install_image
+  image: node:20
+
+install:
+  stage: install
+  <<: *install_image
+  script:
+    - cd backend && npm install
+    - cd ../frontend && npm install
+  artifacts:
+    paths:
+      - backend/node_modules/
+      - frontend/node_modules/
+    expire_in: never
+
+test:
+  stage: test
+  <<: *install_image
+  script:
+    - cd backend && npm test || true
+  artifacts:
+    when: always
+    paths:
+      - backend/reports/
+    expire_in: never
+
+# ------------------------------------------------------------------
+# BUILD IMAGES (Docker-in-Docker)
+# ------------------------------------------------------------------
+build_images:
+  stage: build
+  image: docker:25.0.3
+  services:
+    - name: docker:25.0.3-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: 1
+  script:
+    - docker info
+    - docker build -t backend-image:ci backend
+    - docker build -t frontend-image:ci frontend
+    - docker save backend-image:ci -o backend-image.tar
+    - docker save frontend-image:ci -o frontend-image.tar
+  artifacts:
+    paths:
+      - backend-image.tar
+      - frontend-image.tar
+    expire_in: never
+
+# ------------------------------------------------------------------
+# SECURITY: Snyk (no token, OSS mode)
+# ------------------------------------------------------------------
+snyk_scan:
+  stage: security
+  image: node:20
+  needs: ["install"]
+  before_script:
+    - npm install -g snyk
+  script:
+    - mkdir -p reports
+    - cd backend
+    - snyk test --json --severity-threshold=low > ../reports/snyk-backend.json || true
+  artifacts:
+    when: always
+    paths:
+      - reports/snyk-backend.json
+    expire_in: never
+
+# ------------------------------------------------------------------
+# SECURITY: Trivy
+# ------------------------------------------------------------------
+trivy_scan:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  needs: ["build_images"]
+  script:
+    - mkdir -p reports
+    - echo "Scanning backend image with Trivy..."
+    - trivy image --input backend-image.tar --format template --template "@contrib/html.tpl" --output reports/trivy_backend.html --severity HIGH,CRITICAL || true
+    - echo "Scanning frontend image with Trivy..."
+    - trivy image --input frontend-image.tar --format template --template "@contrib/html.tpl" --output reports/trivy_frontend.html --severity HIGH,CRITICAL || true
+  artifacts:
+    when: always
+    paths:
+      - reports/trivy_backend.html
+      - reports/trivy_frontend.html
+    expire_in: never
+
+# ------------------------------------------------------------------
+# DAST: OWASP ZAP baseline
+# ------------------------------------------------------------------
+dast_zap:
+  stage: dast
+  image: docker:25.0.3
+  services:
+    - name: docker:25.0.3-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - mkdir -p $CI_PROJECT_DIR/.zap
+    - docker compose -f docker-compose.yml --profile ci up -d
+    - sleep 20
+    - docker ps
+    - docker logs banking-backend || true
+    - docker run --network ${COMPOSE_PROJECT_NAME}_default -v "$CI_PROJECT_DIR/.zap:/zap/wrk" owasp/zap2docker-stable zap-baseline.py -t "${ZAP_TARGET}" -r zap-baseline.html -J zap.json || true
+    - mkdir -p reports
+    - mv $CI_PROJECT_DIR/.zap/zap-baseline.html reports/ || true
+    - mv $CI_PROJECT_DIR/.zap/zap.json reports/ || true
+  artifacts:
+    when: always
+    paths:
+      - reports/zap-baseline.html
+      - reports/zap.json
+      - reports/deepsource_report.html
+    expire_in: never
+  after_script:
+    - docker compose -f docker-compose.yml --profile ci down -v || true

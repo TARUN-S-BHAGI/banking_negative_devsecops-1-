@@ -1,0 +1,74 @@
+name: CI - Banking DevSecOps Negative
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm install
+          cd ../frontend && npm install
+
+      - name: Build and start services with docker-compose
+        run: |
+          docker compose build
+          docker compose up -d
+          sleep 20
+          docker ps
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Run Snyk on backend (no token, OSS mode)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          cd backend
+          snyk test --json --severity-threshold=low > ../reports/snyk-backend.json || true
+
+      - name: Trivy FS scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'table'
+          output: 'reports/trivy-fs.txt'
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:10001/api/health'
+          rules_file_name: ''
+          cmd_options: '-r zap-baseline.html'
+        continue-on-error: true
+
+      - name: Move ZAP report to reports folder
+        run: |
+          mkdir -p reports
+          if [ -f zap-baseline.html ]; then
+            mv zap-baseline.html reports/zap-baseline.html
+          fi
+
+      - name: List reports
+        run: |
+          echo "Reports directory content:"
+          ls -R reports || echo "No reports directory"
+
+      - name: Upload reports as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/
