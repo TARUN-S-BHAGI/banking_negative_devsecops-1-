@@ -5,65 +5,71 @@ on:
     branches: [ main ]
 
 jobs:
-  scan:
+  build-and-scan:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install tools
+      - name: Install Tools
         run: |
+          sudo apt update
+          sudo apt install -y docker.io
           npm install -g snyk snyk-to-html
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      - name: Install project deps
+      - name: Install dependencies
         run: |
           cd backend && npm install || true
           cd ../frontend && npm install || true
 
-      - name: Build containers
+      - name: Build and Run Docker
         run: |
           docker build -t backend-image:ci backend || true
           docker build -t frontend-image:ci frontend || true
+          docker compose -f docker-compose.yml up -d || true
+          sleep 25
 
-      - name: Run containers
-        run: |
-          docker compose -f docker-compose.yml --profile ci up -d --build || true
-          sleep 20
-
+      # ------------------------ SNYK ------------------------
       - name: Snyk HTML Report
         run: |
           mkdir -p reports
           cd backend
           snyk test --json-file-output=../reports/snyk.json || true
-          snyk-to-html -i ../reports/snyk.json -o ../reports/snyk-backend.html
+          snyk-to-html -i ../reports/snyk.json -o ../reports/snyk-backend.html || true
+          cd ..
 
+      # ------------------------ TRIVY ------------------------
       - name: Trivy HTML Report
         run: |
           mkdir -p reports
-          trivy image backend-image:ci --format template --template "@contrib/html.tpl" --output reports/trivy-backend.html || true
-          trivy image frontend-image:ci --format template --template "@contrib/html.tpl" --output reports/trivy-frontend.html || true
+          trivy image backend-image:ci --format json --output reports/trivy-backend.json || true
+          trivy image frontend-image:ci --format json --output reports/trivy-frontend.json || true
+          trivy convert report -i reports/trivy-backend.json -o reports/trivy-backend.html || true
+          trivy convert report -i reports/trivy-frontend.json -o reports/trivy-frontend.html || true
 
+      # ------------------------ ZAP ------------------------
       - name: ZAP HTML Report
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: "http://localhost:10001/api/health"
+          target: "http://localhost:3000/api/health"
           cmd_options: "-r zap.html"
         continue-on-error: true
 
-      - name: Collect ALL security reports
+      - name: Move ZAP Report
         run: |
           mkdir -p reports
           if [ -f zap.html ]; then mv zap.html reports/zap-baseline.html; fi
-          if [ -f zap-baseline.html ]; then mv zap-baseline.html reports/zap-baseline.html; fi
+
+      # ------------------------ DeepSource ------------------------
+      - name: Copy DeepSource HTML
+        run: |
+          mkdir -p reports
           if [ -f deepsource_report.html ]; then cp deepsource_report.html reports/deepsource_report.html; fi
 
-      - name: Upload Reports
+      # ------------------------ Artifact ------------------------
+      - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: reports/
+          path: reports
