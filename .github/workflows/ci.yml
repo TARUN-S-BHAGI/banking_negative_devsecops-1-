@@ -55,10 +55,12 @@ jobs:
           cmd_options: "-r zap.html"
         continue-on-error: true
 
-      - name: Move ZAP HTML to reports
+      - name: Collect ALL security reports
         run: |
           mkdir -p reports
           if [ -f zap.html ]; then mv zap.html reports/zap-baseline.html; fi
+          if [ -f zap-baseline.html ]; then mv zap-baseline.html reports/zap-baseline.html; fi
+          if [ -f deepsource_report.html ]; then cp deepsource_report.html reports/deepsource_report.html; fi
 
       - name: Upload Reports
         uses: actions/upload-artifact@v4
