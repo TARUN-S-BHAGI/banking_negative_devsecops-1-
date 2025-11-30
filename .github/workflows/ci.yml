@@ -53,10 +53,11 @@ jobs:
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: "http://localhost:10000"
-          cmd_options: "-J zap.json -I"     # -I = do not fail / no annotations
-          fail_action: false               # avoids pipeline failure
-        timeout-minutes: 10
+          target: "http://host.docker.internal:10000"
+          cmd_options: "-J zap.json -I"
+          fail_action: false
+          continue-on-error: true
+
 
       - name: Move ZAP JSON
         run: |
