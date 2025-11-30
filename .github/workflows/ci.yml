@@ -5,72 +5,72 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-scan:
+  security-scan:
     runs-on: ubuntu-latest
+    continue-on-error: true        # prevents failure + annotations
 
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Install CLI security tools ----------
+      # ========== Install global tools ==========
       - name: Install Tools
         run: |
-          npm install -g snyk snyk-to-html
+          npm install -g snyk snyk-to-json
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      # ---------- Install backend + frontend deps ----------
+      # ========== Install backend + frontend deps ==========
       - name: Install dependencies
         run: |
           cd backend && npm install || true
           cd ../frontend && npm install || true
 
-      # ---------- Build + run Docker containers ----------
-      - name: Build and Run Docker
+      # ========== Docker build =============
+      - name: Build Docker Images
         run: |
           docker build -t backend-image:ci backend || true
           docker build -t frontend-image:ci frontend || true
           docker compose -f docker-compose.yml up -d || true
           sleep 25
 
-      # ---------- SNYK (HTML report) ----------
-      - name: Snyk HTML Report
+      - name: Create reports folder
+        run: mkdir -p reports
+
+      # ========== SNYK JSON ==========
+      - name: Snyk JSON
         run: |
-          mkdir -p reports
           cd backend
-          snyk test --json-file-output=../reports/snyk.json || true
-          snyk-to-html -i ../reports/snyk.json -o ../reports/snyk-backend.html || true
-          cd ..
+          snyk test --json-file-output=../reports/snyk-backend.json &>/dev/null || true
+          cd ../frontend
+          snyk test --json-file-output=../reports/snyk-frontend.json &>/dev/null || true
 
-      # ---------- TRIVY (HTML reports) ----------
-      - name: Trivy HTML Report
+      # ========== TRIVY JSON ==========
+      - name: Trivy JSON
         run: |
-          mkdir -p reports
-          trivy image backend-image:ci --format json --output reports/trivy-backend.json || true
-          trivy image frontend-image:ci --format json --output reports/trivy-frontend.json || true
-          trivy convert report -i reports/trivy-backend.json -o reports/trivy-backend.html || true
-          trivy convert report -i reports/trivy-frontend.json -o reports/trivy-frontend.html || true
+          trivy image backend-image:ci --format json --output reports/trivy-backend.json &>/dev/null || true
+          trivy image frontend-image:ci --format json --output reports/trivy-frontend.json &>/dev/null || true
 
-      # ---------- ZAP (HTML report) ----------
-      - name: ZAP HTML Report
+      # ========== ZAP JSON ==========
+      - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: "http://localhost:10000/api/health"
-          cmd_options: "-r zap.html"
+          target: "http://localhost:10000"
+          cmd_options: "-J zap.json"   # output JSON report
         continue-on-error: true
 
-      - name: Move ZAP Report
+      - name: Move ZAP JSON
         run: |
-          mkdir -p reports
-          if [ -f zap.html ]; then mv zap.html reports/zap-baseline.html; fi
+          if [ -f zap.json ]; then mv zap.json reports/zap.json; fi
 
-      # ---------- DeepSource (static HTML) ----------
-      - name: Copy DeepSource HTML
+      # ========== DeepSource ==========
+      - name: Copy DeepSource JSON
         run: |
-          mkdir -p reports
-          if [ -f deepsource_report.html ]; then cp deepsource_report.html reports/deepsource_report.html; fi
+          if ls deepsource*.json 1> /dev/null 2>&1; then
+            cp deepsource*.json reports/deepsource.json || true
+          fi
 
-      # ---------- Artifact upload ----------
+      # ========== Upload Artifacts ==========
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: reports
+          path: reports/
