@@ -54,8 +54,9 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: "http://localhost:10000"
-          cmd_options: "-J zap.json"
-        continue-on-error: true
+          cmd_options: "-J zap.json -q"
+          continue-on-error: true
+
 
       - name: Move ZAP JSON
         run: |
